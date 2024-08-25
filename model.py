@@ -9,11 +9,13 @@ class NeuralNetwork(nn.Module):
         # Input layer
         self.layers.append(nn.Linear(input_size, hidden_sizes[0]))
         self.layers.append(nn.ReLU())
+        self.layers.append(nn.LayerNorm(hidden_sizes[0]))
         
         # Hidden layers
         for i in range(len(hidden_sizes) - 1):
             self.layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i+1]))
             self.layers.append(nn.ReLU())
+            self.layers.append(nn.LayerNorm(hidden_sizes[i+1]))
         
         # Output layer
         self.layers.append(nn.Linear(hidden_sizes[-1], output_size))

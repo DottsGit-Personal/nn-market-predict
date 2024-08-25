@@ -1,10 +1,14 @@
 import torch
 import numpy as np
+import pandas as pd
 from sklearn.metrics import mean_squared_error, r2_score
 
 def evaluate_model(model, X_test, y_test):
     model.eval()
     with torch.no_grad():
+        # Convert DataFrame to numpy array if it's not already
+        if isinstance(X_test, pd.DataFrame):
+            X_test = X_test.values
         X_test_tensor = torch.FloatTensor(X_test)
         y_pred = model(X_test_tensor).numpy()
         
