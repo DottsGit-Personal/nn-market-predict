@@ -10,94 +10,64 @@ from model import create_model
 from train import train_model
 
 def backtest(model, data, scaler_X, scaler_y, start_date, initial_amount, feature_names):
+    device = next(model.parameters()).device  # Get the device of the model
+    model.eval()  # Set the model to evaluation mode
+    
     portfolio = initial_amount
     shares = 0
     transactions = []
-    last_action = None
-    holding_period = 0
-
-    # Convert start_date to UTC
+    
     start_date = pd.to_datetime(start_date).tz_localize('UTC')
-
-    # Convert data index to UTC
     data.index = data.index.tz_convert('UTC')
-
-    print(f"Backtest start date: {start_date}")
-    print(f"Data start date: {data.index[0]}")
-    print(f"Data end date: {data.index[-1]}")
-
-    for i in range(len(data)):
-        date = data.index[i]
-        if date < start_date:
-            continue
-
-        # Prepare input data for the model
-        input_data = data.iloc[i][feature_names].to_frame().T
-        input_data_scaled = scaler_X.transform(input_data)
-        input_tensor = torch.FloatTensor(input_data_scaled)
-        
-        # Get model prediction
-        with torch.no_grad():
-            prediction_scaled = model(input_tensor).item()
-        prediction = scaler_y.inverse_transform([[prediction_scaled]])[0][0]
-        
-        current_price = data.iloc[i]['Close']
-        
-        # Calculate the predicted price change
-        predicted_change = prediction  # The prediction is already the percentage change
-
-        print(f"Date: {date}, Prediction: {prediction:.4f}, Current Price: {current_price:.4f}, Predicted Change: {predicted_change:.4f}")
-        print(f"Portfolio: ${portfolio:.2f}, Shares: {shares}")
-
-        # Simulate buying
-        if predicted_change > 0.0001 and portfolio > current_price:
-            shares_to_buy = int(portfolio * 0.5 // current_price)  # Use 50% of available cash
-            if shares_to_buy > 0:
-                cost = shares_to_buy * current_price
-                shares += shares_to_buy
-                portfolio -= cost
-                transactions.append((date, 'BUY', shares_to_buy, current_price, cost, portfolio, shares * current_price + portfolio))
-                print(f"Bought {shares_to_buy} shares at {current_price}")
-                last_action = 'BUY'
-                holding_period = 0
-            else:
-                print("Not enough cash to buy shares")
-        elif predicted_change > 0.0001:
-            print("Would buy, but not enough cash")
-        
-        # Simulate selling
-        elif predicted_change < -0.0001 and shares > 0:
-            shares_to_sell = shares  # Sell all shares
-            revenue = shares_to_sell * current_price
-            portfolio += revenue
-            shares -= shares_to_sell
-            transactions.append((date, 'SELL', shares_to_sell, current_price, revenue, portfolio, shares * current_price + portfolio))
-            print(f"Sold {shares_to_sell} shares at {current_price}")
-            last_action = 'SELL'
-            holding_period = 0
-        elif predicted_change < -0.0001:
-            print("Would sell, but no shares owned")
-
-        holding_period += 1
-        print(f"No action taken. Holding period: {holding_period}")
-        print("--------------------")
-
+    
+    with torch.no_grad():
+        for i in range(len(data)):
+            date = data.index[i]
+            if date < start_date:
+                continue
+            
+            # Prepare input data for the model
+            input_data = data.iloc[i][feature_names].to_frame().T
+            input_data_scaled = scaler_X.transform(input_data)
+            input_tensor = torch.FloatTensor(input_data_scaled).to(device)
+            
+            # Get model prediction
+            prediction_scaled = model(input_tensor).cpu().item()
+            prediction = scaler_y.inverse_transform([[prediction_scaled]])[0][0]
+            
+            current_price = data.iloc[i]['Close']
+            predicted_change = prediction
+            
+            # Simulate buying
+            if predicted_change > 0.01 and portfolio > current_price:
+                shares_to_buy = int(portfolio * 0.5 // current_price)  # Use 50% of available cash
+                if shares_to_buy > 0:
+                    cost = shares_to_buy * current_price
+                    shares += shares_to_buy
+                    portfolio -= cost
+                    transactions.append((date, 'BUY', shares_to_buy, current_price, cost, portfolio, shares * current_price + portfolio))
+            
+            # Simulate selling
+            elif predicted_change < -0.01 and shares > 0:
+                shares_to_sell = shares  # Sell all shares
+                revenue = shares_to_sell * current_price
+                portfolio += revenue
+                shares -= shares_to_sell
+                transactions.append((date, 'SELL', shares_to_sell, current_price, revenue, portfolio, shares * current_price + portfolio))
+    
     # Sell any remaining shares at the end
     if shares > 0:
         final_price = data.iloc[-1]['Close']
         revenue = shares * final_price
         portfolio += revenue
         transactions.append((data.index[-1], 'SELL', shares, final_price, revenue, portfolio, portfolio))
-        print(f"Final sell: {shares} shares at {final_price}")
-
+    
     if not transactions:
-        print("No transactions were made during the backtest period.")
-        # Add initial and final portfolio value as transactions
         initial_date = data.index[data.index >= start_date][0]
         final_date = data.index[-1]
         transactions.append((initial_date, 'INITIAL', 0, data.loc[initial_date, 'Close'], 0, initial_amount, initial_amount))
         transactions.append((final_date, 'FINAL', 0, data.loc[final_date, 'Close'], 0, portfolio, portfolio))
-
+    
     return pd.DataFrame(transactions, columns=['Date', 'Action', 'Shares', 'Price', 'Amount', 'Cash', 'Total Value'])
 
 def main(ticker, start_date, end_date, initial_amount, lookback_days=20, hidden_sizes=[128, 64, 32]):
@@ -110,8 +80,8 @@ def main(ticker, start_date, end_date, initial_amount, lookback_days=20, hidden_
         return
 
     # Split the data into training (up to 2023-01-01) and backtesting periods
-    train_data = data[data.index < '2023-01-01']
-    backtest_data = data[data.index >= '2023-01-01']
+    train_data = data[data.index < start_date]
+    backtest_data = data[data.index >= start_date]
 
     # Prepare data for the model
     X = train_data.drop('Target', axis=1)
@@ -123,11 +93,21 @@ def main(ticker, start_date, end_date, initial_amount, lookback_days=20, hidden_
     X_scaled = scaler_X.fit_transform(X)
     y_scaled = scaler_y.fit_transform(y.values.reshape(-1, 1))
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    
     # Create and train the model
     input_size = X_scaled.shape[1]
     output_size = 1
     model = create_model(input_size, hidden_sizes, output_size)
-    trained_model = train_model(model, X_scaled, y_scaled, num_epochs=300)
+    trained_model = train_model(model, X_scaled, y_scaled, num_epochs=300, device=device)
+
+    # Ensure the model is on the same device as in training
+    device = next(trained_model.parameters()).device
+    trained_model = trained_model.to(device)
+    
+    feature_names = X.columns.tolist()
+    backtest_results = backtest(trained_model, backtest_data, scaler_X, scaler_y, start_date, initial_amount, feature_names)
 
     # Run backtest
     feature_names = X.columns.tolist()

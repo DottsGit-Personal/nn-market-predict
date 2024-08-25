@@ -5,7 +5,17 @@ from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import pandas as pd
 
-def train_model(model, X_train, y_train, batch_size=32, num_epochs=200, learning_rate=0.001):
+def train_model(model, X_train, y_train, batch_size=128, num_epochs=200, learning_rate=0.001):
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+    else:
+        device = torch.device("cpu")
+        print("CUDA is not available. Using CPU.")
+
+    model = model.to(device)
+    print(f"Model is on device: {next(model.parameters()).device}")
+    
     # Convert data to numpy arrays if they're DataFrames
     if isinstance(X_train, pd.DataFrame):
         X_train = X_train.values
@@ -16,21 +26,24 @@ def train_model(model, X_train, y_train, batch_size=32, num_epochs=200, learning
     if y_train.ndim == 1:
         y_train = y_train.reshape(-1, 1)
     
-    # Convert numpy arrays to PyTorch tensors
-    X_train_tensor = torch.FloatTensor(X_train)
-    y_train_tensor = torch.FloatTensor(y_train)
+    # Convert numpy arrays to PyTorch tensors and move to GPU
+    X_train_tensor = torch.FloatTensor(X_train).to(device)
+    y_train_tensor = torch.FloatTensor(y_train).to(device)
+    
+    print(f"Input tensor device: {X_train_tensor.device}")
+    print(f"Target tensor device: {y_train_tensor.device}")
+    print(f"GPU Memory Allocated: {torch.cuda.memory_allocated(0) / 1e6:.2f} MB")
     
     # Create DataLoader
     train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     
     # Loss function and optimizer
-    criterion = nn.HuberLoss()
+    criterion = nn.HuberLoss().to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
     
     # Training loop
-    prev_lr = learning_rate
     for epoch in range(num_epochs):
         model.train()
         total_loss = 0
@@ -54,11 +67,14 @@ def train_model(model, X_train, y_train, batch_size=32, num_epochs=200, learning
         
         # Adjust learning rate
         scheduler.step(avg_loss)
-        
-        # Print current learning rate if it has changed
-        current_lr = optimizer.param_groups[0]['lr']
-        if epoch == 0 or current_lr != prev_lr:
-            print(f'Learning rate adjusted to: {current_lr}')
-        prev_lr = current_lr
     
     return model
+
+# If you need to add any additional functions or code here, please do so.
+
+if __name__ == "__main__":
+    # This block is for testing purposes
+    print("CUDA available:", torch.cuda.is_available())
+    if torch.cuda.is_available():
+        print("CUDA device count:", torch.cuda.device_count())
+        print("CUDA device name:", torch.cuda.get_device_name(0))
