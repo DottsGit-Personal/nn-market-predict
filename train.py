@@ -5,16 +5,9 @@ from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import pandas as pd
 
-def train_model(model, X_train, y_train, batch_size=128, num_epochs=200, learning_rate=0.001):
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-        print(f"Using GPU: {torch.cuda.get_device_name(0)}")
-    else:
-        device = torch.device("cpu")
-        print("CUDA is not available. Using CPU.")
-
+def train_model(model, X_train, y_train, batch_size=32, num_epochs=200, learning_rate=0.001, device='cpu'):
+    # Move model to the specified device
     model = model.to(device)
-    print(f"Model is on device: {next(model.parameters()).device}")
     
     # Convert data to numpy arrays if they're DataFrames
     if isinstance(X_train, pd.DataFrame):
@@ -26,13 +19,9 @@ def train_model(model, X_train, y_train, batch_size=128, num_epochs=200, learnin
     if y_train.ndim == 1:
         y_train = y_train.reshape(-1, 1)
     
-    # Convert numpy arrays to PyTorch tensors and move to GPU
+    # Convert numpy arrays to PyTorch tensors and move to the specified device
     X_train_tensor = torch.FloatTensor(X_train).to(device)
     y_train_tensor = torch.FloatTensor(y_train).to(device)
-    
-    print(f"Input tensor device: {X_train_tensor.device}")
-    print(f"Target tensor device: {y_train_tensor.device}")
-    print(f"GPU Memory Allocated: {torch.cuda.memory_allocated(0) / 1e6:.2f} MB")
     
     # Create DataLoader
     train_dataset = TensorDataset(X_train_tensor, y_train_tensor)

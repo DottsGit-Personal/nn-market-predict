@@ -23,30 +23,34 @@ def main(ticker='QQQ', start_date='2010-01-01', end_date=None, lookback_days=20,
         print(f"No data available for {ticker} in the specified date range.")
         return
     
-    print(f"Data shape: {data.shape}")
-    print(f"Data date range: from {data.index[0]} to {data.index[-1]}")
-    print(f"Last row of data:\n{data.iloc[-1]}")
+    #print(f"Data shape: {data.shape}")
+    #print(f"Data date range: from {data.index[0]} to {data.index[-1]}")
+    #print(f"Last row of data:\n{data.iloc[-1]}")
     
     data.to_csv(f'{ticker}_data.csv', index=False)
     
     # Load and preprocess data
     X_train, X_test, y_train, y_test, scaler_X, scaler_y = load_data(f'{ticker}_data.csv', 'Target')
     
-    # Create model
+    # Determine device (GPU if available, else CPU)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    # Create model and move it to the appropriate device
     input_size = X_train.shape[1]
     output_size = 1  # Predicting a single value (next day's percentage change)
-    model = create_model(input_size, hidden_sizes, output_size)
+    model = create_model(input_size, hidden_sizes, output_size).to(device)
     
     # Train model
-    trained_model = train_model(model, X_train, y_train, num_epochs=300)
+    trained_model = train_model(model, X_train, y_train, num_epochs=300, device=device)
     
     # Evaluate model
     mse, rmse, r2 = evaluate_model(trained_model, X_test, y_test)
     
     # Make a prediction for the next day
-    last_known_data = torch.FloatTensor(X_test.iloc[-1].values).unsqueeze(0)
+    last_known_data = torch.FloatTensor(X_test.iloc[-1].values).unsqueeze(0).to(device)
     with torch.no_grad():
-        next_day_change_scaled = trained_model(last_known_data).item()
+        next_day_change_scaled = trained_model(last_known_data).cpu().item()
     
     # Inverse transform the prediction
     next_day_change = scaler_y.inverse_transform([[next_day_change_scaled]])[0][0]
